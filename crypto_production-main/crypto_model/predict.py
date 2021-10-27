@@ -27,7 +27,7 @@ def main(df):
     model = get_model()
     output = _predict(model, df)
 
-    output = output.sort_values(by=['per_prob_score']).tail(3)
+    output = output.sort_values(by=['date', 'per_prob_score'], ascending=False).groupby(['date']).head(3)
     output = output.merge(temp, on=['date', 'ticker'], how='left')
     return output
 
