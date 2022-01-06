@@ -42,6 +42,9 @@ def main(prediction_file='output/historical_predictions.csv',
     # print(temp.head())
     print(f"Average Accuracy: {(temp['relative_returns'] > 0).mean()}")
     print(f"Average Relative Returns: {round(temp['relative_returns'].mean()*100, 4)}")
+
+    temp = ls.groupby(['date'])['return'].mean().reset_index()
+    print(f"Average Returns: {round(ls['return'].mean() * 100, 4)}")
     # ls.to_csv('historical_returns.csv', index=False)
 
 

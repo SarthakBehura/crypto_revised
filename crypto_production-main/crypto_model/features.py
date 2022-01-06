@@ -4,8 +4,8 @@ import warnings
 import numpy as np
 import pandas as pd
 import pandas_ta as ta
-# from crypto_model import fund_features as fdf
-import fund_features as fdf
+from feature_utils import fund_features, apply_parallel, \
+    technicals_with_lag, time_features, interaction_features
 from config import FEATURES
 
 warnings.filterwarnings('ignore')
@@ -20,18 +20,31 @@ def main(df):
     all_data = all_data[all_data['ticker'] != 'BTCUSDT'].copy()
     all_data = all_data.merge(index_data, on='close_time', how='left')
     all_data.rename(columns={'close_time': 'date'}, inplace=True)
-    all_data['date'] = pd.to_datetime(all_data['date'], unit='ms')
-    all_data['date'] = all_data['date'].dt.tz_localize('UTC').dt.tz_convert('Asia/Kolkata')
+
+    all_data['date'] = all_data['date'].apply(lambda x: datetime.datetime.fromtimestamp(int(x) / 1000))
 
     # all_data = all_data[all_data['date'] < datetime.datetime.utcnow()].copy()
     # Append derived features to main dataframe
     print('Building derived features')
     _derived(all_data)
+    _lag(all_data)
+
+    print('Building time based features')
+    time_features(all_data)
+
+    print('Building interaction features')
+    interaction_features(all_data)
+    _lag(all_data, feat_for_lag=['close_by_open', 'high_by_open', 'high_by_close',
+                                 'low_by_open', 'low_by_close', 'high_minus_low',
+                                 'close_minus_open'])
 
     # Build fund features
     print('Building fund features')
-    batches_of_funds = fdf.multiprocessing(all_data['ticker'].unique().tolist())
-    all_data = fdf.feature_generator(batches_of_funds, all_data)
+    fund_df = apply_parallel(all_data.groupby('ticker'), fund_features)
+
+    # TI with lag
+    print('Building Technicals with lag')
+    ti_df = apply_parallel(all_data.groupby(['ticker']), technicals_with_lag).reset_index()
 
     # Other features
     print('Building other technicals')
@@ -42,20 +55,14 @@ def main(df):
     regexp = '^(?!.*_DROP)'
     all_data = all_data.merge(tech_df, on=['date', 'ticker'], how='left',
                               suffixes=('', '_DROP')).filter(regex=regexp)
-    # all_data = all_data.merge(tech_df, on=['date', 'ticker'], how='left')
-    return_cols = list(set(FEATURES + ['open', 'high', 'low', 'close', 'volume', 'index_close']))
-    # all_data['CKSPl_10_3_20'], all_data['CKSPs_10_3_20'] = all_data.ta.cksp()
-    # not_present = [x for x in return_cols if x not in all_data.columns.tolist()]
-    # return_cols = [x for x in return_cols if x in all_data.columns.tolist()]
-    # print(not_present)
-    all_data.ta.cksp(p=10, x=1, q=9, append=True)
-    all_data.ta.amat(append=True)
-    all_data.rename(columns={'CKSPl_10_1.0_9': 'CKSPl_10_1_9',
-                             'CKSPs_10_1.0_9': 'CKSPs_10_1_9',
-                             'AMATe_LR_8_21_2': 'AMATe_LR_2'}, inplace=True)
-    all_data['HW-UPPER'] = 0
-    return all_data[['date', 'ticker', *return_cols]]
-    # return all_data
+
+    all_data = all_data.merge(fund_df, on=['date', 'ticker'], how='left',
+                              suffixes=('', '_DROP')).filter(regex=regexp)
+
+    all_data = all_data.merge(ti_df, on=['date', 'ticker'], how='left',
+                              suffixes=('', '_DROP')).filter(regex=regexp)
+
+    return all_data
 
 
 def _derived(all_data):
@@ -72,7 +79,7 @@ def _derived(all_data):
     all_data['bear_candle'] = np.where(mask, 1, 0)
 
     # Volatility
-    all_data['volatility'] = (all_data['high'] - all_data['high']) / all_data['close']
+    all_data['volatility'] = (all_data['high'] - all_data['low']) / all_data['close']
 
     # Market Order percentage
     all_data['market_order_per'] = all_data['taker_buy_quote_asset_volume'] / all_data['quote_asset_volume']
@@ -87,6 +94,17 @@ def _derived(all_data):
     # Average Trade Size movement
     all_data['avg_trade_size_move'] = all_data.groupby(['ticker'])['avg_trade_size'].transform(lambda x:
                                                                                                x / x.shift(1) - 1)
+
+
+def _lag(all_data, feat_for_lag=None):
+    if feat_for_lag is None:
+        feat_for_lag = ['vwap', 'bull_candle', 'bear_candle', 'volatility', 'market_order_per_move',
+                        'avg_trade_size_move', 'open', 'high', 'low', 'close', 'volume']
+    for i in feat_for_lag:
+        for j in range(1, 16):
+            all_data[f'{i}_lag{j}'] = all_data.sort_values(by=['ticker',
+                                                               'date']).groupby(['ticker'])[i].transform(
+                lambda x: x.shift(j))
 
 
 def _technicals(all_data):
@@ -108,21 +126,20 @@ def _technicals(all_data):
         df.reset_index(drop=True)
         ls.append(df)
 
-    final_df = pd.concat(ls, ignore_index=True)
-
-    ignore_cols = ['open', 'high', 'low', 'close', 'volume', 'number_of_trades', 'quote_asset_volume',
-                   'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'index_close', 'vwap',
-                   'bull_candle', 'bear_candle', 'volatility', 'market_order_per', 'market_order_per_move',
-                   'avg_trade_size', 'avg_trade_size_move']
-
-    return final_df.drop(columns=ignore_cols)
+    final = pd.concat(ls, ignore_index=True)
+    # Future data leak features
+    drop = ['DPO_20', 'ICS_26', 'QQEs_14_5_4.236', 'SUPERTl_7_3.0', 'PSARs_0.02_0.2',
+            'HILOs_13_21', 'PSARl_0.02_0.2', 'HILOl_13_21', 'SUPERTs_7_3.0', 'EOM_14_100000000']
+    final = final.drop(columns=drop)
+    return final
 
 
 if __name__ == "__main__":
     # final_df = data_fetch(start_date=datetime.datetime.now().strftime("%Y-%m-%d"))
-    feat_df = pd.read_csv('../data/all_data.csv')
+    feat_df = pd.read_csv('../data/all_data_historic.csv')
+    print(feat_df.shape)
+    print(feat_df['ticker'].nunique())
+
     final_df = main(feat_df)
-    final_df.to_csv('../data/all_features.csv', index=False)
+    final_df.to_csv('../data/all_features_historic_p1.csv', index=False)
     print(final_df.tail())
-    # print(feat_df.ta.above(append=True))
-    # print(feat_df)
