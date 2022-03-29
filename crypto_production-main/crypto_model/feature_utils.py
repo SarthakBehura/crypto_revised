@@ -7,7 +7,7 @@ import ti_utils
 
 
 def apply_parallel(df_grouped, func):
-    ret_lst = Parallel(n_jobs=mp.cpu_count()-1)(delayed(func)(group) for name, group in df_grouped)
+    ret_lst = Parallel(n_jobs=mp.cpu_count()-10)(delayed(func)(group) for name, group in df_grouped)
     return pd.concat(ret_lst)
 
 
@@ -155,3 +155,61 @@ def interaction_features(data):
     data['low_by_close'] = data['low'] / data['close']
     data['high_minus_low'] = (data['high'] - data['low']) / data['close']
     data['close_minus_open'] = (data['close'] - data['open']) / data['close']
+
+
+# Shrinking dataframe to fit in memory
+def reduce_mem_usage(df):
+    df.columns = df.columns.get_level_values(0)
+    print("Shape of dataframe is: ", df.shape)
+    bool_cols = df.select_dtypes('bool').columns.tolist()
+    for c in bool_cols:
+        df[c] = pd.to_numeric(df[c], errors='coerce')
+    start_mem_usg = df.memory_usage().sum() / 1024 ** 2
+    print("Memory usage of dataframe is :",start_mem_usg," MB")
+    for col in df.select_dtypes(['int64', 'float64']).columns:
+        df[col] = df[col].fillna(0)
+        # keep track of for IsInt?, max and min
+        IsInt = True
+        mx = df[col].max()
+        mn = df[col].min()
+
+        # print(col,mx,mn)
+
+        # test if column can be converted to an integer
+        # print(df[col][:2])
+        if df[col].dtype == 'float64':
+            asint = df[col].astype(np.int64)
+            result = (df[col] - asint)
+            result = result.sum()
+            IsInt = result > -0.01 and result < 0.01
+
+        # Make Integer/unsigned Integer datatypes
+        if IsInt:
+            if mn >= 0:
+                if mx < 255:
+                    df[col] = df[col].astype(np.uint8)
+                elif mx < 65535:
+                    df[col] = df[col].astype(np.uint16)
+                elif mx < 4294967295:
+                    df[col] = df[col].astype(np.uint32)
+                else:
+                    df[col] = df[col].astype(np.uint64)
+            else:
+                if mn > np.iinfo(np.int8).min and mx < np.iinfo(np.int8).max:
+                    df[col] = df[col].astype(np.int8)
+                elif mn > np.iinfo(np.int16).min and mx < np.iinfo(np.int16).max:
+                    df[col] = df[col].astype(np.int16)
+                elif mn > np.iinfo(np.int32).min and mx < np.iinfo(np.int32).max:
+                    df[col] = df[col].astype(np.int32)
+                elif mn > np.iinfo(np.int64).min and mx < np.iinfo(np.int64).max:
+                    df[col] = df[col].astype(np.int64)
+                    # Make float datatypes 32 bit
+        else:
+            df[col] = df[col].astype(np.float32)
+        # print(df[col].dtype)
+
+    # Print final result
+    print("___MEMORY USAGE AFTER COMPLETION:___")
+    mem_usg = df.memory_usage().sum() / 1024 ** 2
+    print("Memory usage is: ", mem_usg, " MB")
+    print("This is ", 100 * mem_usg / start_mem_usg, "% of the initial size")

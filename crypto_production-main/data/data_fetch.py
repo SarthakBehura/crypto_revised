@@ -7,7 +7,7 @@ import pandas as pd
 import multiprocessing as mp
 from binance.client import Client
 
-from config import BINANCE_API_KEY, BINANCE_SECRET_KEY, TICKERS_1, TICKERS_2, TICKERS, USDT_TICKERS
+from config import BINANCE_API_KEY, BINANCE_SECRET_KEY, TICKERS
 
 DATA_COL = ['start_time', 'open', 'high', 'low', 'close',
             'volume', 'close_time', 'quote_asset_volume', 'number_of_trades',
@@ -60,8 +60,8 @@ def data_fetch(start_date="05 July, 2021",
 def data_fetch_one(symbol, start_date):
     # ls = pd.DataFrame(columns=[*DATA_COL, 'ticker'])
     print(f'data fetching for ticker {symbol}')
-    klines = client.get_historical_klines(symbol, Client.KLINE_INTERVAL_30MINUTE, start_date)
-    print('data fetched')
+    klines = client.get_historical_klines(symbol, Client.KLINE_INTERVAL_15MINUTE, start_date)
+    # print('data fetched')
     klines = pd.DataFrame(klines, columns=DATA_COL)
     klines['ticker'] = symbol
     # print(klines)
@@ -75,53 +75,63 @@ def main(currencies):
     global completed
     global batch
     try:
-        for coin in currencies:
+        for idx, coin in enumerate(currencies):
             # coi = list(batch)
+            st = time.time()
             final_df = data_fetch_one(symbol=coin,
-                                      start_date='01 Jan 2019')
+                                      start_date='1 Feb 2022')
+            # final_df.to_csv(f'{coin}_1min_candle_test.csv',
+            #                 index=False)
+            print(f'Data for {coin} fetched  in {(time.time()-st)/60} minutes')
             ls.append(final_df)
             # final_df.to_csv(f'batch_{idx + 1}.csv', index=False)
-            if counter % 50 == 0:
-                # pandas concatenate list of tickers
-                ls = pd.concat(ls, ignore_index=True)
-                ls.to_csv(f'batch_{batch}.csv', index=False)
-                ls = []
-                batch += 1
-                time.sleep(60)
-            counter += 1
-            completed.append(coin)
+            # if counter % 50 == 0:
+            #     # pandas concatenate list of tickers
+            #     ls = pd.concat(ls, ignore_index=True)
+            #     ls.to_csv(f'batch_{batch}.csv', index=False)
+            #     ls = []
+            #     batch += 1
+            #     time.sleep(60)
+            # counter += 1
+            # completed.append(coin)
         if len(ls) != 0:
             # pandas concatenate list of tickers
             ls = pd.concat(ls, ignore_index=True)
-            ls.to_csv(f'batch_{batch}.csv', index=False)
-            batch += 1
+            # ls.to_csv(f'batch_{batch}.csv', index=False)
+            ls.to_csv('feb_march_data_historic_usdt_1hour.csv', index=False)
+            # batch += 1
     except Exception as e:
-        print('Coins completed: ')
-        print(completed)
-        time.sleep(60)
-        print('Reinvoking main')
-        global client
-        client = Client(BINANCE_API_KEY, BINANCE_SECRET_KEY)
-
-        new = list(set(TICKERS.copy()) - set(completed))
-        main(new)
+        print(e)
+        # print('Coins completed: ')
+        # print(completed)
+        # time.sleep(60)
+        # print('Reinvoking main')
+        # global client
+        # client = Client(BINANCE_API_KEY, BINANCE_SECRET_KEY)
+        #
+        # new = list(set(TICKERS.copy()) - set(completed))
+        # main(new)
 
 
 if __name__ == "__main__":
     # final_df = data_fetch(start_date=datetime.datetime.now().strftime("%Y-%m-%d"))
     # print(batches)
-
-    main(USDT_TICKERS)
-    # final_df['start_time'] = final_df['start_time'].apply(lambda x: datetime.datetime.fromtimestamp(int(x) / 1000))
-    # final_df['close_time'] = final_df['close_time'].apply(lambda x: datetime.datetime.fromtimestamp(int(x) / 1000))
-
-    # print(final_df.tail())
-
+    # master = pd.read_csv('../master.csv')
+    # usdt_ticks = master[master['quoteAsset'] == 'USDT']['ticker'].unique().tolist()
+    #
+    # leveraged_ticks = [x for x in usdt_ticks if 'UPUSDT' in x or 'DOWNUSDT' in x]
+    # usdt_ticks = list(set(usdt_ticks)-set(leveraged_ticks))
+    # print(len(usdt_ticks))
+    # print(usdt_ticks)
+    usdt_ticks = ['ETHUSDT', 'BTCUSDT']
+    # usdt_ticks = ['ENJUSDT', 'XRPUSDT', 'STORJUSDT', 'UNIUSDT', 'HOTUSDT', 'ANKRUSDT', 'FILUSDT']
+    main(usdt_ticks)
     # Append all batches
     # ls = []
-    # for i in range(1, 4):
+    # for i in range(1, 8):
+    #     # print(i)
     #     temp = pd.read_csv(f'batch_{i}.csv')
     #     ls.append(temp)
     # #
     # ls = pd.concat(ls, ignore_index=True)
-    # ls.to_csv('all_data_historic.csv', index=False)
+    # ls.to_csv('all_data_historic_usdt_1hour.csv', index=False)
